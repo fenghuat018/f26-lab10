@@ -1,12 +1,74 @@
 package edu.cmu.cs214.lab10.harness;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+import edu.cmu.cs214.lab10.domain.BookingStatus;
+import edu.cmu.cs214.lab10.domain.Room;
+import edu.cmu.cs214.lab10.service.BookingService;
+import edu.cmu.cs214.lab10.store.InMemoryBookingStore;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.Test;
+
 /**
- * Where your concurrency tests go.
- *
- * <p>Empty on purpose. The wiring you need is written out below; what to aim it
- * at, and what scenario to drive through it, is yours to work out.
+ * Concurrency regression tests for the confirmed-booking invariant.
  */
 class RaceTest {
+
+    @Test
+    void overlappingRequestsConfirmAtMostOneBooking() throws InterruptedException {
+        String roomId = "WEH-5409";
+        int startMinute = 900;
+        int endMinute = 960;
+        InMemoryBookingStore real = new InMemoryBookingStore();
+        PausingStore gated = new PausingStore(real, "hasOverlap", 1);
+        BookingService service = new BookingService(gated,
+                List.of(new Room(roomId, "Wean 5409", 12)));
+        AtomicReference<Throwable> workerFailure = new AtomicReference<>();
+
+        Runnable book = () -> service.book(roomId, startMinute, endMinute);
+        Thread first = new Thread(book, "customer-A");
+        Thread second = new Thread(book, "customer-B");
+        Thread.UncaughtExceptionHandler recordFailure =
+                (thread, failure) -> workerFailure.compareAndSet(null, failure);
+        first.setUncaughtExceptionHandler(recordFailure);
+        second.setUncaughtExceptionHandler(recordFailure);
+
+        boolean paused;
+        boolean secondFinishedBeforeRelease;
+        first.start();
+        try {
+            // A has computed its overlap answer, but has not received it yet.
+            paused = gated.awaitPaused();
+            second.start();
+            // Let B finish its check and insert before A receives its old answer.
+            second.join(PausingStore.TIMEOUT_MILLIS);
+            secondFinishedBeforeRelease = !second.isAlive();
+        } finally {
+            gated.release();
+            first.join(PausingStore.TIMEOUT_MILLIS);
+            second.join(PausingStore.TIMEOUT_MILLIS);
+        }
+
+        // Report the choreography without making it the regression assertion:
+        // a fix may change or bypass this store call while preserving the invariant.
+        System.out.println("race aim=hasOverlap call=1 paused=" + paused
+                + " fired=" + gated.fired() + " targetCalls=" + gated.targetCallCount()
+                + " customerBFinishedBeforeRelease=" + secondFinishedBeforeRelease);
+        assertFalse(first.isAlive(), "customer A must finish before inspecting the store");
+        assertFalse(second.isAlive(), "customer B must finish before inspecting the store");
+        assertNull(workerFailure.get(), "booking threads must not fail with an exception");
+
+        // Read the real store so verification cannot trigger or count wrapper calls.
+        long confirmed = real.bookingsForRoom(roomId).stream()
+                .filter(booking -> booking.status() == BookingStatus.CONFIRMED)
+                .filter(booking -> booking.overlaps(startMinute, endMinute))
+                .count();
+        assertEquals(1L, confirmed,
+                "A room must have exactly one confirmed booking after two requests for the same free slot");
+    }
 
     // ------------------------------------------------------------------
     // Wiring example 1: wrap the store

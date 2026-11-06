@@ -65,6 +65,182 @@ you missed. Leave the table as you first wrote it.
 that pair pins the schedule you predicted, and the output of two separate
 runs (assertion failure and log lines).
 
+
+Implemented in `RaceTest.overlappingRequestsConfirmAtMostOneBooking()` with
+`new PausingStore(real, "hasOverlap", 1)`. Both customers use the same service,
+room (`WEH-5409`), and range (`[900, 960)`). The first real overlap check
+computes `false` and releases the store monitor before the wrapper pauses A.
+Only that first call pauses, so B can check the still-empty slot and insert
+its confirmed booking before the test releases A. A then inserts based on
+its saved `false` answer.
+
+The test uses bounded waits and joins, releases the gate in `finally`, and
+checks that both workers completed without exceptions. Its regression
+assertion counts overlapping `CONFIRMED` bookings directly in `real` and
+expects exactly one; it does not assert that the buggy end state is correct.
+Gate and scheduling diagnostics are printed rather than used as regression
+assertions, so later fixes can change the internal call sequence.
+
+**Prediction versus observation:** Both runs match the prediction. Each
+prints `paused=true fired=true targetCalls=2` and
+`customerBFinishedBeforeRelease=true`, followed by an invariant assertion
+failure (`expected: <1> but was: <2>`). Each has two `booking.confirmed` log
+lines with distinct IDs for the same room and range. There were no worker
+exceptions or unfinished-worker assertion failures. The original prediction
+above is unchanged.
+
+Both runs used the following command in separate Maven invocations and each
+exited with status 1. Full combined standard output and standard error follow.
+
+```bash
+mvn -B -Dstyle.color=never -Dtest=RaceTest test
+```
+
+#### Run 1 (exit status 1)
+
+```text
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ------------------< edu.cmu.cs214:lab10-reservations >------------------
+[INFO] Building lab10-reservations 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ lab10-reservations ---
+[INFO] skip non existing resourceDirectory /Users/tongfenghua/My mac/CMU-Learning/Agent Eng/f26-lab10/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ lab10-reservations ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ lab10-reservations ---
+[INFO] skip non existing resourceDirectory /Users/tongfenghua/My mac/CMU-Learning/Agent Eng/f26-lab10/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ lab10-reservations ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 3 source files with javac [debug release 21] to target/test-classes
+[INFO] 
+[INFO] --- surefire:3.2.5:test (default-test) @ lab10-reservations ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running edu.cmu.cs214.lab10.harness.RaceTest
+2026-11-06T00:34:32.007Z INFO booking.confirmed booking=bk-1 room=WEH-5409 start=900 end=960
+2026-11-06T00:34:32.010Z INFO booking.confirmed booking=bk-2 room=WEH-5409 start=900 end=960
+race aim=hasOverlap call=1 paused=true fired=true targetCalls=2 customerBFinishedBeforeRelease=true
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.047 s <<< FAILURE! -- in edu.cmu.cs214.lab10.harness.RaceTest
+[ERROR] edu.cmu.cs214.lab10.harness.RaceTest.overlappingRequestsConfirmAtMostOneBooking -- Time elapsed: 0.031 s <<< FAILURE!
+org.opentest4j.AssertionFailedError: A room must have exactly one confirmed booking after two requests for the same free slot ==> expected: <1> but was: <2>
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
+	at org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:132)
+	at org.junit.jupiter.api.AssertEquals.failNotEqual(AssertEquals.java:197)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:166)
+	at org.junit.jupiter.api.Assertions.assertEquals(Assertions.java:664)
+	at edu.cmu.cs214.lab10.harness.RaceTest.overlappingRequestsConfirmAtMostOneBooking(RaceTest.java:69)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+
+[INFO] 
+[INFO] Results:
+[INFO] 
+[ERROR] Failures: 
+[ERROR]   RaceTest.overlappingRequestsConfirmAtMostOneBooking:69 A room must have exactly one confirmed booking after two requests for the same free slot ==> expected: <1> but was: <2>
+[INFO] 
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  1.699 s
+[INFO] Finished at: 2026-11-05T19:34:32-05:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.2.5:test (default-test) on project lab10-reservations: There are test failures.
+[ERROR] 
+[ERROR] Please refer to /Users/tongfenghua/My mac/CMU-Learning/Agent Eng/f26-lab10/target/surefire-reports for the individual test results.
+[ERROR] Please refer to dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+```
+
+#### Run 2 (exit status 1)
+
+```text
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ------------------< edu.cmu.cs214:lab10-reservations >------------------
+[INFO] Building lab10-reservations 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ lab10-reservations ---
+[INFO] skip non existing resourceDirectory /Users/tongfenghua/My mac/CMU-Learning/Agent Eng/f26-lab10/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ lab10-reservations ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ lab10-reservations ---
+[INFO] skip non existing resourceDirectory /Users/tongfenghua/My mac/CMU-Learning/Agent Eng/f26-lab10/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ lab10-reservations ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.2.5:test (default-test) @ lab10-reservations ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running edu.cmu.cs214.lab10.harness.RaceTest
+2026-11-06T00:34:38.095Z INFO booking.confirmed booking=bk-1 room=WEH-5409 start=900 end=960
+2026-11-06T00:34:38.098Z INFO booking.confirmed booking=bk-2 room=WEH-5409 start=900 end=960
+race aim=hasOverlap call=1 paused=true fired=true targetCalls=2 customerBFinishedBeforeRelease=true
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.046 s <<< FAILURE! -- in edu.cmu.cs214.lab10.harness.RaceTest
+[ERROR] edu.cmu.cs214.lab10.harness.RaceTest.overlappingRequestsConfirmAtMostOneBooking -- Time elapsed: 0.030 s <<< FAILURE!
+org.opentest4j.AssertionFailedError: A room must have exactly one confirmed booking after two requests for the same free slot ==> expected: <1> but was: <2>
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
+	at org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:132)
+	at org.junit.jupiter.api.AssertEquals.failNotEqual(AssertEquals.java:197)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:166)
+	at org.junit.jupiter.api.Assertions.assertEquals(Assertions.java:664)
+	at edu.cmu.cs214.lab10.harness.RaceTest.overlappingRequestsConfirmAtMostOneBooking(RaceTest.java:69)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+
+[INFO] 
+[INFO] Results:
+[INFO] 
+[ERROR] Failures: 
+[ERROR]   RaceTest.overlappingRequestsConfirmAtMostOneBooking:69 A room must have exactly one confirmed booking after two requests for the same free slot ==> expected: <1> but was: <2>
+[INFO] 
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.994 s
+[INFO] Finished at: 2026-11-05T19:34:38-05:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.2.5:test (default-test) on project lab10-reservations: There are test failures.
+[ERROR] 
+[ERROR] Please refer to /Users/tongfenghua/My mac/CMU-Learning/Agent Eng/f26-lab10/target/surefire-reports for the individual test results.
+[ERROR] Please refer to dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+```
+
 ---
 
 ## Milestone 2: the patch a teammate sent
