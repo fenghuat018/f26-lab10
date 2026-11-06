@@ -23,7 +23,7 @@ class RaceTest {
         int startMinute = 900;
         int endMinute = 960;
         InMemoryBookingStore real = new InMemoryBookingStore();
-        PausingStore gated = new PausingStore(real, "hasOverlap", 1);
+        PausingStore gated = new PausingStore(real, "hasOverlap", 2);
         BookingService service = new BookingService(gated,
                 List.of(new Room(roomId, "Wean 5409", 12)));
         AtomicReference<Throwable> workerFailure = new AtomicReference<>();
@@ -54,7 +54,7 @@ class RaceTest {
 
         // Report the choreography without making it the regression assertion:
         // a fix may change or bypass this store call while preserving the invariant.
-        System.out.println("race aim=hasOverlap call=1 paused=" + paused
+        System.out.println("race aim=hasOverlap call=2 paused=" + paused
                 + " fired=" + gated.fired() + " targetCalls=" + gated.targetCallCount()
                 + " customerBFinishedBeforeRelease=" + secondFinishedBeforeRelease);
         assertFalse(first.isAlive(), "customer A must finish before inspecting the store");

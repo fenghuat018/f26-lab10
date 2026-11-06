@@ -247,11 +247,140 @@ org.opentest4j.AssertionFailedError: A room must have exactly one confirmed book
 
 **Your milestone-1 test on the patched code.** Green or red. Paste the result.
 
+Green with the original aim, `new PausingStore(real, "hasOverlap", 1)`.
+The following output was supplied from the user's run on the patched code;
+it was not rerun while recording this result.
+
+A pauses after its first overlap check computes `false`. B then completes
+both checks and inserts a confirmed booking. After A resumes, the patch's
+second check detects B's booking and rejects A. The output shows one
+confirmation, one rejection, four overlap calls, and a passing invariant
+assertion. This demonstrates that the added check prevents the original
+interleaving from producing a double booking; it does not establish that
+the second check and insertion are atomic or rule out other interleavings.
+
+```text
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running edu.cmu.cs214.lab10.harness.RaceTest
+2026-11-06T01:08:07.409Z INFO booking.confirmed booking=bk-1 room=WEH-5409 start=900 end=960
+2026-11-06T01:08:07.412Z INFO booking.rejected room=WEH-5409 start=900 end=960 reason=slot already held
+race aim=hasOverlap call=1 paused=true fired=true targetCalls=4 customerBFinishedBeforeRelease=true
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.040 s -- in edu.cmu.cs214.lab10.harness.RaceTest
+[INFO]
+[INFO] Results:
+[INFO]
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+[INFO]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  1.695 s
+[INFO] Finished at: 2026-11-05T20:08:07-05:00
+```
+
 **The re-aimed run.** Method name, call index, the pasted result, and one line
 on why that aim tests the patch rather than sidestepping it.
 
+Red with `new PausingStore(real, "hasOverlap", 2)`. Since B starts only
+once A pauses, the second call across all threads is A's added defensive
+re-check. Both checks execute normally; pausing after the added check
+computes `false` exposes the gap between that check and `insert()`, directly
+testing the patch's claimed protection.
+
+B completes its two checks and inserts `bk-2` while A is paused. A then
+resumes with its saved `false` and inserts `bk-1`. The diagnostics show the
+gate fired and B finished before release; the final-state assertion fails
+with two confirmed bookings instead of one. There are no worker exceptions.
+
+Command (one invocation, exit status 1):
+
+```bash
+mvn -B -Dstyle.color=never -Dtest=RaceTest test
+```
+
+Full combined standard output and standard error:
+
+```text
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ------------------< edu.cmu.cs214:lab10-reservations >------------------
+[INFO] Building lab10-reservations 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.4.0:resources (default-resources) @ lab10-reservations ---
+[INFO] skip non existing resourceDirectory /Users/tongfenghua/My mac/CMU-Learning/Agent Eng/f26-lab10/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ lab10-reservations ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.4.0:testResources (default-testResources) @ lab10-reservations ---
+[INFO] skip non existing resourceDirectory /Users/tongfenghua/My mac/CMU-Learning/Agent Eng/f26-lab10/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ lab10-reservations ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 3 source files with javac [debug release 21] to target/test-classes
+[INFO] 
+[INFO] --- surefire:3.2.5:test (default-test) @ lab10-reservations ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running edu.cmu.cs214.lab10.harness.RaceTest
+2026-11-06T01:10:26.485Z INFO booking.confirmed booking=bk-2 room=WEH-5409 start=900 end=960
+2026-11-06T01:10:26.487Z INFO booking.confirmed booking=bk-1 room=WEH-5409 start=900 end=960
+race aim=hasOverlap call=2 paused=true fired=true targetCalls=4 customerBFinishedBeforeRelease=true
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.053 s <<< FAILURE! -- in edu.cmu.cs214.lab10.harness.RaceTest
+[ERROR] edu.cmu.cs214.lab10.harness.RaceTest.overlappingRequestsConfirmAtMostOneBooking -- Time elapsed: 0.036 s <<< FAILURE!
+org.opentest4j.AssertionFailedError: A room must have exactly one confirmed booking after two requests for the same free slot ==> expected: <1> but was: <2>
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
+	at org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:132)
+	at org.junit.jupiter.api.AssertEquals.failNotEqual(AssertEquals.java:197)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:166)
+	at org.junit.jupiter.api.Assertions.assertEquals(Assertions.java:664)
+	at edu.cmu.cs214.lab10.harness.RaceTest.overlappingRequestsConfirmAtMostOneBooking(RaceTest.java:69)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+
+[INFO] 
+[INFO] Results:
+[INFO] 
+[ERROR] Failures: 
+[ERROR]   RaceTest.overlappingRequestsConfirmAtMostOneBooking:69 A room must have exactly one confirmed booking after two requests for the same free slot ==> expected: <1> but was: <2>
+[INFO] 
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  1.655 s
+[INFO] Finished at: 2026-11-05T20:10:26-05:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.2.5:test (default-test) on project lab10-reservations: There are test failures.
+[ERROR] 
+[ERROR] Please refer to /Users/tongfenghua/My mac/CMU-Learning/Agent Eng/f26-lab10/target/surefire-reports for the individual test results.
+[ERROR] Please refer to dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+```
+
 **Your verdict.** Accept or reject, and what your milestone-1 result does and
 does not show about the patch.
+
+Reject the patch. The original test passes because the added second check
+detects B's insertion and rejects A, proving only that this interleaving is
+handled. Pausing after the second check instead lets both threads insert,
+producing two overlapping confirmed bookings (`expected: <1> but was: <2>`).
+The final check and insert are still separate operations, so the race window
+remains and the ticket's invariant is still violated.
 
 ---
 
