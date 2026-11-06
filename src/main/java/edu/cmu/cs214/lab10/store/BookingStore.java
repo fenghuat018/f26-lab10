@@ -25,7 +25,22 @@ public interface BookingStore {
      */
     boolean hasOverlap(String roomId, int startMinute, int endMinute);
 
-    /** Stores the booking. Ids are assumed unique; the store does not check. */
+    /**
+     * Inserts a CONFIRMED booking only if its room and range are free, checking
+     * and inserting as one atomic operation with respect to all store methods.
+     * Ids are assumed unique; the store does not check.
+     *
+     * @return true if inserted, or false if a confirmed booking overlaps;
+     *     a false result leaves the store unchanged
+     * @throws IllegalArgumentException if the booking is not CONFIRMED
+     */
+    boolean tryInsertConfirmed(Booking booking);
+
+    /**
+     * Stores the booking without checking for conflicts. Use
+     * {@link #tryInsertConfirmed} when requesting a confirmed slot.
+     * Ids are assumed unique; the store does not check.
+     */
     void insert(Booking booking);
 
     /**

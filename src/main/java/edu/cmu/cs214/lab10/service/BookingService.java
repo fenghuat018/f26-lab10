@@ -19,13 +19,14 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>Times are raw minutes from midnight and ranges are half-open, matching
  * {@link Booking}.
  *
- * <p>Thread safety: safe for concurrent use. The service owns no mutable
- * booking state of its own. The room catalog is built once in the constructor
- * and never written again, and every read and write of booking data goes
- * through {@link BookingStore}, whose methods are each synchronized. Since the
- * store is thread safe, the operations built on top of it are too. The only
- * other field that changes after construction is {@link BookingStats}, and its
- * numbers are documented as approximate.
+ * <p>Thread safety: safe for concurrent use. The room catalog is built once
+ * in the constructor and never written again. Booking uses the store's atomic
+ * {@link BookingStore#tryInsertConfirmed} operation, and cancellation and
+ * promotion use its atomic {@link BookingStore#cancelAndPromote} operation.
+ * These operations coordinate through the store even across service instances
+ * sharing the same data. The ID sequence is atomic within each service;
+ * callers sharing a store must still ensure IDs are unique across instances.
+ * {@link BookingStats} numbers are documented as approximate.
  */
 public final class BookingService {
 
@@ -67,18 +68,10 @@ public final class BookingService {
         if (startMinute < 0 || endMinute <= startMinute) {
             return reject(roomId, startMinute, endMinute, "empty or reversed slot");
         }
-        if (store.hasOverlap(roomId, startMinute, endMinute)) {
-            return reject(roomId, startMinute, endMinute, "slot already held");
-        }
         Booking booking = new Booking(nextId(), roomId, startMinute, endMinute, BookingStatus.CONFIRMED);
-        // Defensive re-check. Another request can take the slot between the
-        // check above and the insert below, so read the store once more right
-        // before writing. With the freshest possible answer in hand there is no
-        // window left for a second booking to slip through.
-        if (store.hasOverlap(roomId, startMinute, endMinute)) {
+        if (!store.tryInsertConfirmed(booking)) {
             return reject(roomId, startMinute, endMinute, "slot already held");
         }
-        store.insert(booking);
         stats.recordConfirmed();
         BookingLog.confirmed(booking);
         return BookingResult.confirmed(booking);

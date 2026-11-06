@@ -32,6 +32,20 @@ public final class InMemoryBookingStore implements BookingStore {
     }
 
     @Override
+    public synchronized boolean tryInsertConfirmed(Booking booking) {
+        if (booking.status() != BookingStatus.CONFIRMED) {
+            throw new IllegalArgumentException("booking must be CONFIRMED");
+        }
+        // Hold this store's monitor from the overlap check through insertion.
+        // The nested synchronized call is reentrant and does not release it.
+        if (hasOverlap(booking.roomId(), booking.startMinute(), booking.endMinute())) {
+            return false;
+        }
+        bookings.add(booking);
+        return true;
+    }
+
+    @Override
     public synchronized void insert(Booking booking) {
         bookings.add(booking);
     }
